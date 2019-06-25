@@ -1,0 +1,280 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Criando os servidores e instalando completamente o Wordpress",
+  "Parameters": {
+    "FaixaIPVPC": {
+      "Description": "Faixa IP Utilizada no VPC",
+      "Type": "String",
+      "Default": "192.168.0.0/16",
+          "AllowedValues": ["10.0.0.0/16", "172.16.0.0/16", "192.168.0.0/16"]
+    },
+    "FaixaIPSubredePublica": {
+      "Description": "Faixa IP Utilizada na Subrede Publica",
+      "Type": "String",
+      "Default": "192.168.10.0/24",
+          "AllowedValues": ["10.0.10.0/24", "172.16.10.0/24", "192.168.10.0/24"]
+    },
+    "FaixaIPSubredePrivada": {
+      "Description": "Faixa IP Utilizada na Subrede Privada",
+      "Type": "String",
+      "Default": "192.168.20.0/24",
+          "AllowedValues": ["10.0.20.0/24", "172.16.20.0/24", "192.168.20.0/24"]
+    },
+        "ZonaSubrede": {
+          "Description": "Zona da Subrede",
+          "Type": "Number",
+          "Default": 1
+        },
+    "KeyName": {
+      "Description": "Nome do par de chaves",
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Default": "mykey"
+    },
+      "InstanceType": {
+      "Description": "Tipo de instancia",
+      "Type": "String",
+      "Default": "t2.micro",
+      "AllowedValues": ["t2.micro", "t2.small", "t2.medium"]
+    },
+        "ImageId": {
+          "Description": "Identificador da Imagem",
+          "Type": "String",
+          "Default": "ami-024a64a6685d05041"
+        },
+        "WordPressUser": {
+          "Description": "Usuario do Wordpress",
+          "Type": "String",
+          "Default": "wordpress"
+        },
+        "WordPressPassword": {
+          "Description": "Senha do usuario Wordpress",
+          "Type": "String",
+          "Default": "wordpress"
+        }
+    },
+  "Resources": {
+    "NovoVPC": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+            "CidrBlock": {"Ref": "FaixaIPVPC"},
+            "Tags": [{"Key": "Name", "Value": "NovoVPC"}]
+      }
+    },
+        "SubredePublica": {
+          "Type": "AWS::EC2::Subnet",
+          "Properties": {
+              "VpcId": {"Ref": "NovoVPC"},
+              "CidrBlock": {"Ref": "FaixaIPSubredePublica"},
+              "AvailabilityZone": {
+                  "Fn::Select" : [
+                      {"Ref": "ZonaSubrede"},
+                    {
+                     "Fn::GetAZs": ""
+                  }
+               ]
+            } 
+         }
+        },
+        "SubredePrivada": {
+          "Type": "AWS::EC2::Subnet",
+          "Properties": {
+              "VpcId": {"Ref": "NovoVPC"},
+              "CidrBlock": {"Ref": "FaixaIPSubredePrivada"},
+              "AvailabilityZone": {
+                  "Fn::Select" : [
+                    {"Ref": "ZonaSubrede"},
+                    {
+                     "Fn::GetAZs": ""
+                  }
+               ]
+            } 
+         }
+        },
+        "RoteadorInternet":{
+          "Type": "AWS::EC2::InternetGateway"
+        },
+        "LigacaoRoteadorVPC": {
+          "Type": "AWS::EC2::VPCGatewayAttachment",
+          "Properties": {
+              "InternetGatewayId": {"Ref": "RoteadorInternet"},
+              "VpcId": {"Ref": "NovoVPC"}
+          }
+        },
+        "TabelaRoteamentoPublica": {
+          "Type": "AWS::EC2::RouteTable",
+          "Properties": {
+              "VpcId": {"Ref": "NovoVPC"}
+          }
+        },
+        "EntradaTabelaRoteamentoPublica": {
+          "Type": "AWS::EC2::Route",
+          "Properties": {
+              "GatewayId": {"Ref": "RoteadorInternet"},
+              "DestinationCidrBlock" : "0.0.0.0/0",
+              "RouteTableId": {"Ref": "TabelaRoteamentoPublica"}
+          }
+        },
+        "LigacaoTabelaSubRedePublica": {
+          "Type": "AWS::EC2::SubnetRouteTableAssociation",
+          "Properties": {
+              "SubnetId": {"Ref": "SubredePublica"},
+              "RouteTableId": {"Ref": "TabelaRoteamentoPublica"}
+          }
+        },
+        "TabelaRoteamentoPrivada": {
+          "Type": "AWS::EC2::RouteTable",
+          "Properties": {
+              "VpcId": {"Ref": "NovoVPC"}
+          }
+        },
+        "EntradaTabelaRoteamentoPrivada": {
+          "Type": "AWS::EC2::Route",
+          "Properties": {
+              "GatewayId": {"Ref": "RoteadorInternet"},
+              "DestinationCidrBlock" : "0.0.0.0/0",
+              "RouteTableId": {"Ref": "TabelaRoteamentoPrivada"}
+          }
+        },
+        "LigacaoTabelaSubRedePrivada": {
+          "Type": "AWS::EC2::SubnetRouteTableAssociation",
+          "Properties": {
+              "SubnetId": {"Ref": "SubredePrivada"},
+              "RouteTableId": {"Ref": "TabelaRoteamentoPrivada"}
+          }
+        },
+      "GrupoDeSegurancaBastion": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Bastion",
+        "VpcId": {"Ref": "NovoVPC"},
+        "SecurityGroupIngress": [{
+          "CidrIp": "0.0.0.0/0",
+          "FromPort":22,
+          "IpProtocol": "tcp",
+          "ToPort": 22
+        }]
+      }
+      },
+    "GrupoDeSegurancaWeb": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "Web",
+        "VpcId": {"Ref": "NovoVPC"},
+        "SecurityGroupIngress": [{
+               "CidrIp": "0.0.0.0/0",
+               "FromPort": 80,
+               "IpProtocol": "tcp",
+               "ToPort": 80
+            }, {
+               "FromPort": 22,
+               "IpProtocol": "tcp",
+               "ToPort": 22,
+               "SourceSecurityGroupId" : {
+                  "Ref" : "GrupoDeSegurancaBastion"
+               }
+            }]
+      }
+      },
+    "GrupoDeSegurancaBD": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "MySQL",
+        "VpcId": {"Ref": "NovoVPC"},
+        "SecurityGroupIngress": [{
+               "FromPort": 3306,
+               "IpProtocol": "tcp",
+               "ToPort": 3306,
+               "SourceSecurityGroupId" : {
+                  "Ref" : "GrupoDeSegurancaWeb"
+               }
+            },{
+               "FromPort": 22,
+               "IpProtocol": "tcp",
+               "ToPort": 22,
+               "SourceSecurityGroupId" : {
+                  "Ref" : "GrupoDeSegurancaBastion"
+               }
+            }]
+      }
+    },
+    "ServidorBastion": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {"Ref":"ImageId"},
+        "InstanceType": {"Ref": "InstanceType"},
+        "KeyName": {"Ref": "KeyName"},
+        "NetworkInterfaces": [{
+          "AssociatePublicIpAddress": "true",
+          "DeleteOnTermination": "true",
+          "SubnetId": {"Ref": "SubredePublica"},
+          "DeviceIndex": "0",
+          "GroupSet": [{"Ref": "GrupoDeSegurancaBastion"}]
+              }]
+      }
+    },
+    "ServidorBD": {
+         "Type": "AWS::EC2::Instance",
+         "Properties": {
+            "ImageId": {"Ref":"ImageId"},
+            "InstanceType": {"Ref": "InstanceType"},
+            "KeyName": {"Ref": "KeyName"},
+            "NetworkInterfaces": [{
+               "AssociatePublicIpAddress": "true",
+               "DeleteOnTermination": "true",
+               "SubnetId": {"Ref": "SubredePrivada"},
+               "DeviceIndex": "0",
+               "GroupSet": [{"Ref": "GrupoDeSegurancaBD"}]
+            }],
+            "UserData" : {"Fn::Base64": { "Fn::Join": ["", [
+              "#!/bin/bash -ex \n",
+              "wget https://raw.githubusercontent.com/wastsonbaia/trabalhofinalamazon/master/banco.sh \n",
+              "chmod +x banco.sh \n",
+              "./banco.sh \n"
+            ]]}}
+         }
+        },
+    "ServidorWeb": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {"Ref":"ImageId"},
+        "InstanceType": {"Ref": "InstanceType"},
+        "KeyName": {"Ref": "KeyName"},
+        "NetworkInterfaces": [{
+          "AssociatePublicIpAddress": "true",
+          "DeleteOnTermination": "true",
+          "SubnetId": {"Ref": "SubredePublica"},
+          "DeviceIndex": "0",
+          "GroupSet": [{"Ref": "GrupoDeSegurancaWeb"}]
+            }],
+            "UserData": {"Fn::Base64": { "Fn::Join": ["", [
+               "#!/bin/bash -ex \n",
+               "export IPBD=", {"Fn::GetAtt": ["ServidorBD", "PrivateIp"]}, "\n",
+               "wget https://raw.githubusercontent.com/wastsonbaia/trabalhofinalamazon/master/web.sh \n",
+               "chmod +x teste.sh \n",
+               "export USER=", {"Ref": "WordPressUser"}, "\n",
+               "export PASS=", {"Ref": "WordPressPassword"}, "\n",
+               "./teste.sh \n"
+                    ]]}}
+            }
+      }
+    },
+  "Outputs": {
+    "EnderecoIPPublicoServidorWeb": {
+      "Value": {"Fn::GetAtt": ["ServidorWeb", "PublicIp"]},
+      "Description": "IP publico do servidor Web"
+    },
+    "EnderecoIPPrivadoServidorWeb": {
+      "Value": {"Fn::GetAtt": ["ServidorWeb", "PrivateIp"]},
+      "Description": "IP privado do servidor Web"
+    },
+    "EnderecoIPPrivadoBancoDeDados": {
+      "Value": {"Fn::GetAtt": ["ServidorBD", "PrivateIp"]},
+      "Description": "IP privado do servidor de banco de dados"
+    },
+    "EnderecoIPBastion": {
+      "Value": {"Fn::GetAtt": ["ServidorBastion", "PublicIp"]},
+      "Description": "IP publico do servidor Bastion"
+    }
+
+  }
+}
